@@ -1,8 +1,8 @@
 import pickle
 
+START_TOKEN = "<START>"
 UNK_TOKEN = "<UNK>"
 STOP_TOKEN = "<STOP>"
-START_TOKEN = "<START>"
 
 train_in_filename = "data/1b_benchmark.train.tokens"
 train_out_filename = "train_sequence.pkl"
@@ -22,34 +22,34 @@ def load_dataset(filename):
     # Pad the start and end of sentences with special tokens.
     sequence = []
     for line in lines:
-        sequence.append("<START>")
-        sequence.extend(line.split())
-        sequence.append("<STOP>")
+        sequence.append([START_TOKEN, START_TOKEN] + line.split() + [STOP_TOKEN])
 
     return sequence
 
 
 def format_dataset(in_filename, out_filename, freq):
-    sequence = load_dataset(in_filename)
-    for i, token in enumerate(sequence):
-        # Replace words not seen in the training set.
-        if token not in freq or freq[token] < 3:
-            sequence[i] = UNK_TOKEN
+    dataset = load_dataset(in_filename)
+    for line in dataset:
+        for i, token in enumerate(line):
+            # Replace words not seen in the training set.
+            if token not in freq or freq[token] < 3:
+                line[i] = UNK_TOKEN
 
-    pickle.dump(sequence, open(out_filename, "wb"))
+    pickle.dump(dataset, open(out_filename, "wb"))
 
 
 # Training Set
 
-sequence = load_dataset(train_in_filename)
+dataset = load_dataset(train_in_filename)
 
 # Count word frequency.
 freq = {}
-for token in sequence:
-    if token not in freq:
-        freq[token] = 1
-    else:
-        freq[token] += 1
+for line in dataset:
+    for token in line:
+        if token not in freq:
+            freq[token] = 1
+        else:
+            freq[token] += 1
 
 format_dataset(train_in_filename, train_out_filename, freq)
 
