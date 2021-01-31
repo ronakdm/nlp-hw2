@@ -70,39 +70,6 @@ class LanguageModel:
                 self._add_to_node(token, word_tree[line[t - 1]], idx)
                 self._add_to_node(token, word_tree[line[t - 2]][line[t - 1]], idx)
 
-        # # Add a stop token in the beginning to trigger adding to p(.|START), p(.|START, START)
-        # for t, token in enumerate(([self.STOP_TOKEN] + sequence)[1:]):
-
-        #     # Count unigram frequencies and assign indices to words.
-        #     if token not in self.word_tree:
-        #         self.word_tree[token] = {self.FREQ_TOKEN: 1, self.INDEX_TOKEN: index}
-        #         index += 1
-        #         vocab_list.append(token)
-        #     else:
-        #         self.word_tree[token][self.FREQ_TOKEN] += 1
-
-        #     idx = self.word_tree[token][self.INDEX_TOKEN]
-
-        #     # Count bigram frequencies.
-        #     if self.word_tree[sequence[t - 1]] == self.STOP_TOKEN:
-        #         self._add_to_node(token, self.word_tree[self.START_TOKEN], idx)
-        #         self._add_to_node(
-        #             token, self.word_tree[self.START_TOKEN][self.START_TOKEN], idx
-        #         )
-        #     else:
-        #         self._add_to_node(token, self.word_tree[sequence[t - 1]], idx)
-
-        #     # Count trigram frequencies.
-        #     if t > 1 and self.word_tree[sequence[t - 1]] != self.STOP_TOKEN:
-        #         if self.word_tree[sequence[t - 2]] == self.STOP_TOKEN:
-        #             self._add_to_node(
-        #                 token, self.word_tree[self.START_TOKEN][sequence[t - 1]], idx
-        #             )
-        #         else:
-        #             self._add_to_node(
-        #                 token, self.word_tree[sequence[t - 2]][sequence[t - 1]], idx
-        #             )
-
         vocab_size = len(word_tree)
         return word_tree, vocab_list, vocab_size
 
@@ -131,11 +98,17 @@ class LanguageModel:
             node[self.PROBS_TOKEN] = probs
             return probs
 
-    def generate(self, seq_len):
+    def generate(self, seq_len, lambda1=None, lambda2=None, lambda3=None):
+        if lambda1 is None:
+            lambda1 = self.lambda1
+        if lambda2 is None:
+            lambda2 = self.lambda2
+        if lambda3 is None:
+            lambda3 = self.lambda3
         vocab_idx = np.arange(self.vocab_size).astype(int)
         sentence = [self.START_TOKEN, self.START_TOKEN]
         unigram_model = self._build_probability_vector(self.word_tree)
-        ignore_trigram = False
+
         for t in range(2, seq_len + 2):
 
             bigram_model = self._build_probability_vector(
@@ -146,38 +119,13 @@ class LanguageModel:
                     self.word_tree[sentence[t - 2]][sentence[t - 1]]
                 )
             else:
-                ignore_trigram = True
-            # # Generate probability of next work by computing the probability vector for each model.
-            # if t > 0:
-            #     bigram_model = self._build_probability_vector(
-            #         self.word_tree[sentence[t - 1]]
-            #     )
-            # else:
-            #     bigram_model = self._build_probability_vector(
-            #         self.word_tree[self.START_TOKEN]
-            #     )
-            # if t > 1:
-            #     if sentence[t - 1] in self.word_tree[sentence[t - 2]]:
-            #         trigram_model = self._build_probability_vector(
-            #             self.word_tree[sentence[t - 2]][sentence[t - 1]]
-            #         )
-            #     else:
-            #         trigram_model = np.ones(self.vocab_size) / self.vocab_size
-            # else:
-            #     trigram_model = self._build_probability_vector(
-            #         self.word_tree[self.START_TOKEN][self.START_TOKEN]
-            #     )
+                trigram_model = np.ones(self.vocab_size) / self.vocab_size
 
-            if ignore_trigram:
-                probs = (self.lambda1 * unigram_model + self.lambda2 * bigram_model) / (
-                    self.lambda1 + self.lambda2
-                )
-            else:
-                probs = (
-                    self.lambda1 * unigram_model
-                    + self.lambda2 * bigram_model
-                    + self.lambda3 * trigram_model
-                ) / (self.lambda1 + self.lambda2 + self.lambda3)
+            probs = (
+                lambda1 * unigram_model
+                + lambda2 * bigram_model
+                + lambda3 * trigram_model
+            ) / (lambda1 + lambda2 + lambda3)
 
             token_idx = np.random.choice(vocab_idx, size=1, p=probs)[0]
             sentence.append(self.vocab_list[token_idx])
@@ -188,60 +136,77 @@ class LanguageModel:
 
         return " ".join(sentence)
 
-    def compute_loglikelihood(self, dataset, base=np.exp(1)):
-
+    def compute_loglikelihood(
+        self,
+        dataset,
+        base=np.exp(1),
+        lambda1=None,
+        lambda2=None,
+        lambda3=None,
+        verbose=False,
+    ):
+        if lambda1 is None:
+            lambda1 = self.lambda1
+        if lambda2 is None:
+            lambda2 = self.lambda2
+        if lambda3 is None:
+            lambda3 = self.lambda3
         unigram_model = self._build_probability_vector(self.word_tree)
 
+        step = len(dataset) // 10
+
         loglik = 0
-        for line in dataset:
+        for line_num, line in enumerate(dataset):
+
+            if verbose:
+                if line_num % step == 0:
+                    print("Line %d out of %d" % (line_num, len(dataset)))
+
             for t in range(2, len(line)):
-                bigram_model = self._build_probability_vector(
-                    self.word_tree[line[t - 1]]
-                )
-                if line[t - 1] in self.word_tree[line[t - 2]]:
+                if lambda2 > 0:
+                    bigram_model = self._build_probability_vector(
+                        self.word_tree[line[t - 1]]
+                    )
+                else:
+                    bigram_model = np.zeros(self.vocab_size)
+                if lambda3 > 0 and line[t - 1] in self.word_tree[line[t - 2]]:
                     trigram_model = self._build_probability_vector(
                         self.word_tree[line[t - 2]][line[t - 1]]
                     )
                 else:
                     trigram_model = np.ones(self.vocab_size) / self.vocab_size
-                # for t, token in enumerate(sequence):
-                #     # Generate probability of next work by computing the probability vector for each model.
-                #     if t > 0:
-                #         bigram_model = self._build_probability_vector(
-                #             self.word_tree[sequence[t - 1]]
-                #         )
-                #     else:
-                #         bigram_model = self._build_probability_vector(
-                #             self.word_tree[self.START_TOKEN]
-                #         )
-                #     if t > 1:
-                #         if sequence[t - 1] in self.word_tree[sequence[t - 2]]:
-                #             trigram_model = self._build_probability_vector(
-                #                 self.word_tree[sequence[t - 2]][sequence[t - 1]]
-                #             )
-                #         else:
-                #             trigram_model = np.ones(self.vocab_size) / self.vocab_size
-                #     else:
-                #         trigram_model = self._build_probability_vector(
-                #             self.word_tree[self.START_TOKEN][self.START_TOKEN]
-                #         )
 
                 probs = (
-                    self.lambda1 * unigram_model
-                    + self.lambda2 * bigram_model
-                    + self.lambda3 * trigram_model
-                ) / (self.lambda1 + self.lambda2 + self.lambda3)
+                    lambda1 * unigram_model
+                    + lambda2 * bigram_model
+                    + lambda3 * trigram_model
+                ) / (lambda1 + lambda2 + lambda3)
 
                 index = self.word_tree[line[t]][self.INDEX_TOKEN]
                 loglik += np.log(probs[index]) / np.log(base)
 
         return loglik
 
-    def compute_perplexity(self, dataset, base=2):
+    def compute_perplexity(
+        self, dataset, base=2, lambda1=None, lambda2=None, lambda3=None, verbose=False
+    ):
+        if lambda1 is None:
+            lambda1 = self.lambda1
+        if lambda2 is None:
+            lambda2 = self.lambda2
+        if lambda3 is None:
+            lambda3 = self.lambda3
 
         num_words = 0
         for line in dataset:
             num_words += len(line) - 2
-        loglik = self.compute_loglikelihood(dataset, base=base)
+        loglik = self.compute_loglikelihood(
+            dataset,
+            base=base,
+            lambda1=lambda1,
+            lambda2=lambda2,
+            lambda3=lambda3,
+            verbose=verbose,
+        )
         return base ** (-loglik / num_words)
 
