@@ -3,14 +3,14 @@ import pickle
 model_filename = "model.pkl"
 
 datasets = [
-    "train",
+    # "train",
     "dev",
-    "test",
+    # "test",
 ]
 
 models = [
-    "unigram",
-    "bigram",
+    # "unigram",
+    # "bigram",
     "trigram",
 ]
 
